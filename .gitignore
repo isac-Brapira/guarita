@@ -1,0 +1,26 @@
+# Variáveis de ambiente (NUNCA commitar)
+.env
+
+# Banco de dados e capturas
+events.db
+captures/
+
+# Modelos baixados pelo YOLO
+*.pt
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db

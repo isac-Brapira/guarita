@@ -37,18 +37,39 @@ Na primeira execução, o YOLO baixa o modelo automaticamente (~6 MB pro `yolov8
 
 ## Configuração
 
-Edite `config.py`:
+### 1. Variáveis de ambiente (.env)
 
-1. **`PLATE_RECOGNIZER_TOKEN`** — cole sua chave da API
-2. **`VIDEO_SOURCE`** — defina a fonte:
-   - `0` pra webcam (teste rápido)
-   - `"video.mp4"` pra arquivo
-   - `"rtsp://usuario:senha@IP:554/cam/realmonitor?channel=1&subtype=0"` pro DVR Intelbras
-3. **`ROI`** (opcional) — `(x1, y1, x2, y2)` pra limitar a análise a uma região
-4. **`DEBOUNCE_SECONDS`** — tempo de cooldown entre chamadas à API
-5. **`MIN_GAP_BETWEEN_EVENTS_SECONDS`** — tempo mínimo entre dois eventos da mesma placa (default 10min)
+Copie o template e preencha com seus valores:
 
-Edite `registered_plates.csv` com as placas dos seus caminhões. Formato:
+```bash
+cp .env.example .env
+```
+
+Edite o `.env`:
+
+```
+PLATE_RECOGNIZER_TOKEN=seu_token_aqui
+PLATE_RECOGNIZER_REGION=br
+VIDEO_SOURCE=0
+```
+
+`VIDEO_SOURCE` pode ser:
+- `0` (ou `1`, `2`...) pra webcam
+- `/caminho/do/video.mp4` pra arquivo
+- `rtsp://usuario:senha@IP:554/cam/realmonitor?channel=1&subtype=0` pro DVR Intelbras
+
+> O `.env` está no `.gitignore` — não vai pro repositório. Nunca commit suas chaves.
+
+### 2. Demais configurações (config.py)
+
+Os parâmetros não-sensíveis ficam em `config.py`:
+- **`ROI`** (opcional) — `(x1, y1, x2, y2)` pra limitar a análise a uma região
+- **`DEBOUNCE_SECONDS`** — tempo de cooldown entre chamadas à API
+- **`MIN_GAP_BETWEEN_EVENTS_SECONDS`** — tempo mínimo entre dois eventos da mesma placa (default 10min)
+
+### 3. Placas cadastradas
+
+Edite `registered_plates.csv`:
 
 ```csv
 plate,description

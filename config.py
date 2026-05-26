@@ -3,21 +3,46 @@ Configurações do pipeline de leitura de placas.
 Edite os valores conforme seu ambiente.
 """
 
-# ===============================
-# Fonte de vídeo
-# ===============================
-# Opções:
-#   - 0 (ou 1, 2...): webcam local — bom pra teste inicial
-#   - "caminho/do/video.mp4": arquivo de vídeo gravado
-#   - "rtsp://usuario:senha@IP:554/cam/realmonitor?channel=1&subtype=0": stream do DVR Intelbras
-VIDEO_SOURCE = 0
+"""
+Configurações do pipeline de leitura de placas.
+
+Valores sensíveis (token API, URL do DVR) vêm do arquivo .env.
+Edite o .env (copie do .env.example) — NÃO commit o .env no Git.
+"""
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+
+def _get_video_source():
+    """
+    VIDEO_SOURCE pode ser:
+      - número inteiro (webcam): "0", "1"...
+      - caminho de arquivo: "video.mp4"
+      - URL RTSP: "rtsp://..."
+    """
+    src = os.getenv("VIDEO_SOURCE", "0")
+    # Se for um número, converte pra int (webcam)
+    if src.isdigit():
+        return int(src)
+    return src
 
 
 # ===============================
-# Plate Recognizer (API)
+# Fonte de vídeo (do .env)
 # ===============================
-PLATE_RECOGNIZER_TOKEN = "COLE_SEU_TOKEN_AQUI"
-PLATE_RECOGNIZER_REGION = "br"
+VIDEO_SOURCE = _get_video_source()
+
+
+# ===============================
+# Plate Recognizer (do .env)
+# ===============================
+PLATE_RECOGNIZER_TOKEN = os.getenv("PLATE_RECOGNIZER_TOKEN", "")
+PLATE_RECOGNIZER_REGION = os.getenv("PLATE_RECOGNIZER_REGION", "br")
+
+if not PLATE_RECOGNIZER_TOKEN:
+    print("[AVISO] PLATE_RECOGNIZER_TOKEN não configurado no .env")
 
 
 # ===============================
