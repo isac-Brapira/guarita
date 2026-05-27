@@ -21,7 +21,7 @@ import cv2
 import requests
 
 import config
-from plate_matcher import load_registered_plates, match_plate
+from plate_matcher import load_registered_plates, match_plate_with_candidates
 
 
 # ===============================
@@ -136,6 +136,13 @@ def main():
         print("[ERRO] Não consegui abrir a fonte de vídeo.")
         return
 
+    # Detecta se é arquivo de vídeo (precisa throttle no FPS)
+    is_file = isinstance(config.VIDEO_SOURCE, str) and not config.VIDEO_SOURCE.lower().startswith('rtsp')
+    fps = cap.get(cv2.CAP_PROP_FPS) if is_file else 0
+    frame_delay = 1.0 / fps if fps > 0 else 0
+    if is_file:
+        print(f"[INFO] Arquivo detectado — limitando reprodução a {fps:.1f} FPS")
+
     last_api_call = 0
     frame_count = 0
 
@@ -143,6 +150,8 @@ def main():
 
     try:
         while True:
+            loop_start = time.time()
+
             ret, frame = cap.read()
             if not ret:
                 print("[INFO] Fim do stream.")
@@ -150,6 +159,11 @@ def main():
 
             frame_count += 1
             if frame_count % config.FRAME_SKIP != 0:
+                # Throttle mesmo nos frames pulados pra manter velocidade real
+                if frame_delay:
+                    elapsed = time.time() - loop_start
+                    if elapsed < frame_delay:
+                        time.sleep(frame_delay - elapsed)
                 continue
 
             # Aplica ROI
@@ -177,33 +191,48 @@ def main():
                 if now - last_api_call < config.DEBOUNCE_SECONDS:
                     status += " [cooldown]"
                 else:
-                    # 2. Detecção de veículo
+                    # 2. Detecção de veículo — pega o MAIOR bounding box (mais perto da câmera)
                     results = model(work_frame, conf=config.YOLO_CONFIDENCE, verbose=False)
-                    vehicle_detected = False
+                    best_box = None
+                    best_area = 0
 
                     for r in results:
                         for box in r.boxes:
                             cls_id = int(box.cls[0])
                             if cls_id in config.VEHICLE_CLASSES:
-                                vehicle_detected = True
                                 x1b, y1b, x2b, y2b = map(int, box.xyxy[0])
-                                if config.ROI:
-                                    x1b += config.ROI[0]; x2b += config.ROI[0]
-                                    y1b += config.ROI[1]; y2b += config.ROI[1]
-                                cv2.rectangle(display, (x1b, y1b), (x2b, y2b),
-                                              (0, 255, 0), 2)
+                                area = (x2b - x1b) * (y2b - y1b)
+                                if area > best_area:
+                                    best_area = area
+                                    best_box = (x1b, y1b, x2b, y2b)
 
-                    if vehicle_detected:
-                        status = "veiculo detectado - enviando"
+                    if best_box:
+                        x1b, y1b, x2b, y2b = best_box
+                        if config.ROI:
+                            x1b += config.ROI[0]; x2b += config.ROI[0]
+                            y1b += config.ROI[1]; y2b += config.ROI[1]
+                        cv2.rectangle(display, (x1b, y1b), (x2b, y2b), (0, 255, 0), 2)
+
+                        # Expande um pouco o bbox pra garantir que pega a placa nas bordas
+                        h, w = frame.shape[:2]
+                        pad = 20
+                        cx1 = max(0, x1b - pad)
+                        cy1 = max(0, y1b - pad)
+                        cx2 = min(w, x2b + pad)
+                        cy2 = min(h, y2b + pad)
+                        vehicle_crop = frame[cy1:cy2, cx1:cx2]
+
+                        status = "veiculo detectado - enviando recorte"
                         last_api_call = now
 
-                        # Salva imagem
-                        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-                        image_path = os.path.join(config.IMAGES_DIR, f"capture_{ts}.jpg")
-                        cv2.imwrite(image_path, frame)
+                        # Salva recorte (o que vai pra API) e frame completo (pra auditoria)
+                        ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
+                        crop_path = os.path.join(config.IMAGES_DIR, f"crop_{ts}.jpg")
+                        cv2.imwrite(crop_path, vehicle_crop)
+                        image_path = crop_path
 
-                        # 3. API
-                        response = send_to_plate_recognizer(image_path)
+                        # 3. API (enviando só o recorte do veículo — taxa de acerto bem maior)
+                        response = send_to_plate_recognizer(crop_path)
 
                         if response and response.get('results'):
                             result = response['results'][0]
@@ -212,11 +241,24 @@ def main():
 
                             print(f"\n[OCR] {plate_raw} ({confidence:.1%})")
 
-                            # 4. Match com banco
-                            matched = match_plate(plate_raw, registered)
+                            # 4. Match com banco usando TODOS os candidatos do OCR
+                            # (não só o melhor — a leitura correta pode estar como 2ª ou 3ª opção)
+                            api_candidates = result.get('candidates', [])
+                            if not api_candidates:
+                                api_candidates = [{'plate': result['plate'], 'score': result['score']}]
+
+                            matched = match_plate_with_candidates(api_candidates, registered)
                             if matched:
-                                plate_final, dist, desc = matched
+                                plate_final = matched['matched_plate']
+                                dist = matched['distance']
+                                desc = matched['description']
+                                via = matched['via_candidate']
                                 tag = f" - {desc}" if desc else ""
+
+                                # Se o match veio de um candidato alternativo, avisa
+                                if via != plate_raw.replace('-', ''):
+                                    print(f"[OCR alt] Match via candidato '{via}' "
+                                          f"(score: {matched['candidate_score']:.1%})")
                                 print(f"[MATCH] {plate_final}{tag}  [dist={dist:.1f}]")
                             else:
                                 plate_final = plate_raw
@@ -232,9 +274,17 @@ def main():
                                 tipo = "ENTRADA" if event_type == 'entry' else "SAÍDA "
                                 print(f"[REGISTRO] >>> {tipo} <<< {plate_final}")
                         else:
-                            print("[INFO] Nenhuma placa detectada no frame.")
+                            print("[INFO] Nenhuma placa detectada no recorte. Reduzindo cooldown.")
+                            # Se não achou placa, libera nova tentativa em DEBOUNCE_MISS_SECONDS (curto)
+                            last_api_call = now - config.DEBOUNCE_SECONDS + config.DEBOUNCE_MISS_SECONDS
                     else:
                         status = "movimento sem veiculo"
+
+            # Throttle pra arquivos de vídeo (mantém velocidade real)
+            if frame_delay:
+                elapsed = time.time() - loop_start
+                if elapsed < frame_delay:
+                    time.sleep(frame_delay - elapsed)
 
             # Mostra janela
             if config.SHOW_WINDOW:

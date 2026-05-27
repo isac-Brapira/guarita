@@ -72,7 +72,8 @@ ROI = None
 # Performance
 # ===============================
 FRAME_SKIP = 5                # processa 1 a cada N frames (economiza CPU)
-DEBOUNCE_SECONDS = 30         # após enviar pra API, aguarda N seg antes de mandar outra
+DEBOUNCE_SECONDS = 30         # após enviar pra API com SUCESSO, aguarda N seg
+DEBOUNCE_MISS_SECONDS = 3     # após enviar e NÃO achar placa, libera em N seg (retry rápido)
 
 
 # ===============================
